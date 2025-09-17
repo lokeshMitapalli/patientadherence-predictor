@@ -40,20 +40,11 @@ def encode_dataframe(df):
             df[col] = df[col].astype('category').cat.codes
     return df
 
-def check_missing_dosage(df):
-    follow_up = df["Follow_Up_Days"] if "Follow_Up_Days" in df.columns else pd.Series([None]*len(df))
-    dosage = df["Dosage_mg"] if "Dosage_mg" in df.columns else pd.Series([0]*len(df))
-    alerts = df[(df["Predicted_Adherence"] == "Non-Adherent") |
-                (dosage == 0) |
-                (follow_up.isna())]
-    return alerts
-
 def send_email_alert(patient_id, recipient_email):
     msg = MIMEText(f"⚠ Alert: Patient {patient_id} is NON-ADHERENT. Please follow up immediately.")
     msg["Subject"] = "🚨 Non-Adherence Alert"
-    msg["From"] = "your_email@gmail.com"  # Replace with your Gmail
+    msg["From"] = "your_email@gmail.com"
     msg["To"] = recipient_email
-
     try:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
             server.login("mittapallilokeswarreddy10@gmail.com", "loki10042005")  # Use App Password
@@ -153,6 +144,12 @@ if st.sidebar.button("Predict"):
 
         prediction = model.predict(input_df)[0]
         result = "Adherent" if prediction == 1 else "Non-Adherent"
+
+        # 🔎 Show probabilities
+        if hasattr(model, "predict_proba"):
+            proba = model.predict_proba(input_df)[0]
+            st.write("🔎 Prediction probabilities:", proba)
+
         show_toast(f"✅ Single prediction: {result}", color="green")
         st.success(f"Prediction: {result}")
     except Exception as e:
@@ -175,6 +172,10 @@ if st.button("Run Batch Prediction"):
 
         preds = model.predict(X_copy)
         data["Predicted_Adherence"] = ["Adherent" if p == 1 else "Non-Adherent" for p in preds]
+
+        # 🔎 Add probabilities
+        if hasattr(model, "predict_proba"):
+            data["Prediction_Probabilities"] = model.predict_proba(X_copy).tolist()
 
         show_toast("✅ Batch prediction completed successfully!", color="green")
         st.write("### Full Dataset with Predictions")
@@ -208,7 +209,6 @@ if st.button("Run Batch Prediction"):
             else:
                 st.success("All patients are adherent and up-to-date on dosages!")
 
-       
         buffer = BytesIO()
         data.to_csv(buffer, index=False)
         buffer.seek(0)
@@ -221,3 +221,4 @@ if st.button("Run Batch Prediction"):
     except Exception as e:
         show_toast("❌ Error during batch prediction!", color="red")
         st.error(f"Error during batch prediction: {e}")
+
