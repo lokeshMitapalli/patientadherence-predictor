@@ -6,6 +6,8 @@ import pickle
 from io import BytesIO
 import smtplib
 from email.mime.text import MIMEText
+import json
+from twilio.rest import Client
 
 st.set_page_config(page_title="Patient Adherence Dashboard", layout="wide")
 st.title("Patient Adherence Prediction Dashboard")
@@ -39,8 +41,8 @@ def encode_dataframe(df):
             df[col] = df[col].astype('category').cat.codes
     return df
 
-def send_email(patient_id, recipient_email):
-    msg = MIMEText(f"⚠ Alert: Patient {patient_id} is NON-ADHERENT. Please follow up immediately.")
+def send_email(patient_id, probability, recipient_email):
+    msg = MIMEText(f"⚠ Alert: Patient {patient_id} is NON-ADHERENT.\nEstimated Non-Adherence Probability: {probability*100:.1f}%\nPlease follow up immediately.")
     msg["Subject"] = "🚨 Non-Adherence Alert"
     msg["From"] = "your_email@gmail.com"
     msg["To"] = recipient_email
@@ -50,6 +52,25 @@ def send_email(patient_id, recipient_email):
             server.send_message(msg)
         return True
     except:
+        return False
+
+# Twilio WhatsApp configuration
+TWILIO_SID = "your_twilio_sid"
+TWILIO_AUTH_TOKEN = "your_twilio_auth_token"
+TWILIO_WHATSAPP_NUMBER = "whatsapp:+14155238886"
+
+def send_whatsapp(patient_id, probability, recipient_whatsapp):
+    try:
+        client = Client(TWILIO_SID, TWILIO_AUTH_TOKEN)
+        message = f"⚠ Alert: Patient {patient_id} is NON-ADHERENT.\nEstimated Non-Adherence Probability: {probability*100:.1f}%\nPlease follow up immediately."
+        client.messages.create(
+            body=message,
+            from_=TWILIO_WHATSAPP_NUMBER,
+            to=recipient_whatsapp
+        )
+        return True
+    except Exception as e:
+        st.error(f"WhatsApp sending failed: {e}")
         return False
 
 model = None
@@ -125,8 +146,8 @@ if st.sidebar.button("Predict"):
         prediction = model.predict(input_df)[0]
         result = "Adherent" if prediction == 1 else "Non-Adherent"
         if hasattr(model, "predict_proba"):
-            proba = model.predict_proba(input_df)[0]
-            st.write("Prediction probabilities:", proba)
+            proba = model.predict_proba(input_df)[0][1]
+            st.write(f"Prediction probability (Non-Adherent): {proba*100:.1f}%")
         show_toast(f"✅ Single prediction: {result}", color="green")
         st.success(f"Prediction: {result}")
     except:
@@ -135,6 +156,14 @@ if st.sidebar.button("Predict"):
 st.subheader("Batch Prediction")
 threshold = st.slider("Non-Adherence Probability Threshold", 0.5, 1.0, 0.7, 0.01)
 recipient = st.text_input("Recipient Email for Alerts")
+recipient_whatsapp = st.text_input("Recipient WhatsApp (format: whatsapp:+1234567890)")
+
+EMAIL_RECORD_FILE = os.path.join(os.path.dirname(__file__), "emailed_patients.json")
+if os.path.exists(EMAIL_RECORD_FILE):
+    with open(EMAIL_RECORD_FILE, "r") as f:
+        emailed_patients = set(json.load(f))
+else:
+    emailed_patients = set()
 
 if st.button("Run Batch Prediction"):
     try:
@@ -144,27 +173,55 @@ if st.button("Run Batch Prediction"):
         for col in trained_features:
             if col not in X_copy.columns: X_copy[col] = 0
         X_copy = X_copy[trained_features]
+
         preds = model.predict(X_copy)
         probs = model.predict_proba(X_copy)[:, 1] if hasattr(model, "predict_proba") else [0]*len(X_copy)
         data["Predicted_Adherence"] = ["Adherent" if p == 1 else "Non-Adherent" for p in preds]
         data["Non_Adherence_Prob"] = probs
         st.dataframe(data)
+
         high_risk = data[data["Non_Adherence_Prob"] >= threshold]
+
         if not high_risk.empty:
             st.error(f"{len(high_risk)} HIGH-RISK NON-ADHERENT patients")
             st.dataframe(high_risk)
-            for _, row in high_risk.iterrows():
-                patient_id = row.get("Patient_ID", "Unknown")
-                send_email(patient_id, recipient)
-            st.success("✅ Email alerts sent to high-risk patients")
+
+            st.info("📧 Sending email & WhatsApp alerts in real-time...")
+            progress_bar = st.progress(0)
+            total = len(high_risk)
+
+            for i, row in enumerate(high_risk.itertuples(), start=1):
+                patient_id = getattr(row, "Patient_ID", "Unknown")
+                probability = getattr(row, "Non_Adherence_Prob", 0)
+
+                if patient_id not in emailed_patients:
+                    email_success = send_email(patient_id, probability, recipient)
+                    whatsapp_success = send_whatsapp(patient_id, probability, recipient_whatsapp)
+                    if email_success:
+                        st.success(f"Email sent for Patient {patient_id} ({probability*100:.1f}%)")
+                    if whatsapp_success:
+                        st.success(f"WhatsApp sent for Patient {patient_id} ({probability*100:.1f}%)")
+                    emailed_patients.add(patient_id)
+                else:
+                    st.info(f"Skipped Patient {patient_id} (already alerted)")
+
+                progress_bar.progress(i / total)
+
+            with open(EMAIL_RECORD_FILE, "w") as f:
+                json.dump(list(emailed_patients), f)
+
+            st.success("✅ All alerts processed")
         else:
             st.success("All patients below risk threshold")
+
         buffer = BytesIO()
         data.to_csv(buffer, index=False)
         buffer.seek(0)
         st.download_button("Download Predictions as CSV", data=buffer, file_name="patient_predictions.csv", mime="text/csv")
-    except:
-        st.error("Error during batch prediction")
+
+    except Exception as e:
+        st.error(f"Error during batch prediction: {e}")
+
 
 
 
