@@ -6,7 +6,6 @@ import pickle
 from io import BytesIO
 import smtplib
 from email.mime.text import MIMEText
-from twilio.rest import Client
 
 st.set_page_config(page_title="Patient Adherence Dashboard", layout="wide")
 st.title("Patient Adherence Prediction Dashboard")
@@ -52,28 +51,6 @@ def send_email(patient_id, recipient_email):
         return True
     except:
         return False
-
-def send_twilio_sms(patient_id, phone_number):
-    account_sid = "YOUR_TWILIO_SID"
-    auth_token = "YOUR_TWILIO_AUTH_TOKEN"
-    client = Client(account_sid, auth_token)
-    message = client.messages.create(
-        body=f"⚠ Alert: Patient {patient_id} is NON-ADHERENT. Please follow up immediately.",
-        from_="YOUR_TWILIO_PHONE",
-        to=phone_number
-    )
-    return message.sid
-
-def send_whatsapp(patient_id, phone_number):
-    account_sid = "YOUR_TWILIO_SID"
-    auth_token = "YOUR_TWILIO_AUTH_TOKEN"
-    client = Client(account_sid, auth_token)
-    message = client.messages.create(
-        body=f"⚠ Alert: Patient {patient_id} is NON-ADHERENT. Please follow up immediately.",
-        from_="whatsapp:YOUR_TWILIO_WHATSAPP_NUMBER",
-        to=f"whatsapp:{phone_number}"
-    )
-    return message.sid
 
 model = None
 model_path = os.path.join(os.path.dirname(__file__), 'model.pkl')
@@ -166,8 +143,7 @@ for msg in insights:
 
 st.subheader("Batch Prediction")
 threshold = st.slider("Non-Adherence Probability Threshold", 0.5, 1.0, 0.7, 0.01)
-alert_method = st.selectbox("Alert Method", ["Email", "SMS", "WhatsApp"])
-recipient = st.text_input("Recipient (Email or Phone Number)")
+recipient = st.text_input("Recipient Email for Alerts")
 
 if st.button("Run Batch Prediction"):
     try:
@@ -193,10 +169,8 @@ if st.button("Run Batch Prediction"):
             st.dataframe(high_risk)
             for _, row in high_risk.iterrows():
                 patient_id = row.get("Patient_ID", "Unknown")
-                if alert_method == "Email": send_email(patient_id, recipient)
-                elif alert_method == "SMS": send_twilio_sms(patient_id, recipient)
-                elif alert_method == "WhatsApp": send_whatsapp(patient_id, recipient)
-            st.success("✅ Alerts sent to high-risk patients")
+                send_email(patient_id, recipient)
+            st.success("✅ Email alerts sent to high-risk patients")
         else:
             st.success("All patients below risk threshold")
         buffer = BytesIO()
@@ -205,6 +179,7 @@ if st.button("Run Batch Prediction"):
         st.download_button("Download Predictions as CSV", data=buffer, file_name="patient_predictions.csv", mime="text/csv")
     except:
         st.error("Error during batch prediction")
+
 
 
 
