@@ -7,8 +7,10 @@ from io import BytesIO
 import smtplib
 from email.mime.text import MIMEText
 
+st.set_page_config(page_title="Patient Adherence Dashboard", layout="wide")
 st.title("Patient Adherence Prediction Dashboard")
 
+# ----------------- Toast Message -----------------
 def show_toast(message, color="green"):
     toast_html = f"""
     <div style="
@@ -22,9 +24,7 @@ def show_toast(message, color="green"):
         font-size: 16px;
         z-index: 9999;
         box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-    ">
-        {message}
-    </div>
+    ">{message}</div>
     <script>
         setTimeout(function(){{
             var toasts = document.querySelectorAll('[style*="position: fixed; bottom: 20px;"]');
@@ -34,12 +34,14 @@ def show_toast(message, color="green"):
     """
     st.markdown(toast_html, unsafe_allow_html=True)
 
+# ----------------- Encode Data -----------------
 def encode_dataframe(df):
     for col in df.columns:
         if df[col].dtype == 'object':
             df[col] = df[col].astype('category').cat.codes
     return df
 
+# ----------------- Send Email Alert -----------------
 def send_email_alert(patient_id, recipient_email):
     msg = MIMEText(f"⚠ Alert: Patient {patient_id} is NON-ADHERENT. Please follow up immediately.")
     msg["Subject"] = "🚨 Non-Adherence Alert"
@@ -47,14 +49,14 @@ def send_email_alert(patient_id, recipient_email):
     msg["To"] = recipient_email
     try:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login("mittapallilokeswarreddy10@gmail.com", "loki10042005")  # Use App Password
+            server.login("mittapallilokeswarreddy10@gmail.com", "loki10042005")
             server.send_message(msg)
         return True
     except Exception as e:
         st.error(f"Email sending failed: {e}")
         return False
 
-
+# ----------------- Load Model -----------------
 model = None
 model_path = os.path.join(os.path.dirname(__file__), 'model.pkl')
 
@@ -74,7 +76,7 @@ if os.path.exists(model_path):
             model = None
 
 if model is None:
-    st.warning("No valid model found in project folder. Please upload your model file.")
+    st.warning("No valid model found. Please upload your model file.")
     uploaded_model = st.file_uploader("Upload your model file (.pkl)", type=["pkl"])
     if uploaded_model:
         try:
@@ -92,6 +94,7 @@ if model is None:
 if model is None:
     st.stop()
 
+# ----------------- Upload Dataset -----------------
 st.sidebar.header("Upload Your Dataset (CSV)")
 uploaded_file = st.sidebar.file_uploader("Upload a CSV file", type=["csv"])
 
@@ -119,6 +122,7 @@ else:
 
 X = data.drop(columns=["Adherence"], errors='ignore')
 
+# ----------------- Single Prediction -----------------
 st.sidebar.header("Make a Single Prediction")
 input_data = {}
 for col in X.columns:
@@ -129,23 +133,18 @@ if st.sidebar.button("Predict"):
     try:
         input_df = pd.DataFrame([input_data])
         input_df = encode_dataframe(input_df)
-
         for col in input_df.columns:
-            try:
-                input_df[col] = pd.to_numeric(input_df[col])
-            except:
-                pass
+            try: input_df[col] = pd.to_numeric(input_df[col])
+            except: pass
 
         trained_features = model.feature_names_in_
         for col in trained_features:
-            if col not in input_df.columns:
-                input_df[col] = 0
+            if col not in input_df.columns: input_df[col] = 0
         input_df = input_df[trained_features]
 
         prediction = model.predict(input_df)[0]
         result = "Adherent" if prediction == 1 else "Non-Adherent"
 
-        # 🔎 Show probabilities
         if hasattr(model, "predict_proba"):
             proba = model.predict_proba(input_df)[0]
             st.write("🔎 Prediction probabilities:", proba)
@@ -156,6 +155,17 @@ if st.sidebar.button("Predict"):
         show_toast("❌ Error during single prediction!", color="red")
         st.error(f"Error during prediction: {e}")
 
+# ----------------- Clinical Insights -----------------
+st.sidebar.header("Clinical Insights / Active Analysis")
+insights = [
+    "📊 Increasing trend of therapy discontinuation for a Specialty brand leading to high care service consumption and overall cost.",
+    "🎯 Objective: Develop an AI/ML framework to predict patients at risk of going off therapy.",
+    "💡 Suggest appropriate recommendations to retain at-risk patients and improve adherence."
+]
+for msg in insights:
+    st.info(msg)
+
+# ----------------- Batch Prediction -----------------
 st.subheader("Batch Prediction on Uploaded Dataset")
 if st.button("Run Batch Prediction"):
     try:
@@ -166,24 +176,21 @@ if st.button("Run Batch Prediction"):
 
         trained_features = model.feature_names_in_
         for col in trained_features:
-            if col not in X_copy.columns:
-                X_copy[col] = 0
+            if col not in X_copy.columns: X_copy[col] = 0
         X_copy = X_copy[trained_features]
 
         preds = model.predict(X_copy)
         data["Predicted_Adherence"] = ["Adherent" if p == 1 else "Non-Adherent" for p in preds]
 
-        # 🔎 Add probabilities
         if hasattr(model, "predict_proba"):
             data["Prediction_Probabilities"] = model.predict_proba(X_copy).tolist()
 
         show_toast("✅ Batch prediction completed successfully!", color="green")
         st.write("### Full Dataset with Predictions")
         st.dataframe(data)
-        
+
         if "Predicted_Adherence" in data.columns:
             st.subheader("📊 Adherence Overview")
-
             adherence_counts = data["Predicted_Adherence"].value_counts()
             st.write("### Adherence Count")
             st.bar_chart(adherence_counts)
@@ -193,12 +200,15 @@ if st.button("Run Batch Prediction"):
             ratio_df.columns = ["Adherence_Status", "Percentage"]
             st.dataframe(ratio_df)
             st.area_chart(ratio_df.set_index("Adherence_Status"))
-            
+
             non_adherent = data[data["Predicted_Adherence"] == "Non-Adherent"]
 
             if not non_adherent.empty:
                 st.error(f"⚠ {len(non_adherent)} NON-ADHERENT patients found!")
                 st.dataframe(non_adherent)
+
+                # Recommendation message
+                st.info("Recommendation: Proactively follow up with non-adherent patients to improve therapy retention.")
 
                 recipient = st.text_input("Doctor Email", "doctor@example.com")
                 if st.button("Send Email Alerts"):
@@ -221,6 +231,7 @@ if st.button("Run Batch Prediction"):
     except Exception as e:
         show_toast("❌ Error during batch prediction!", color="red")
         st.error(f"Error during batch prediction: {e}")
+
 
 
 
