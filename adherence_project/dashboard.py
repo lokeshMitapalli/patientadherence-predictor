@@ -158,11 +158,6 @@ if st.button("Run Batch Prediction"):
         data["Predicted_Adherence"] = ["Adherent" if p == 1 else "Non-Adherent" for p in preds]
         data["Non_Adherence_Prob"] = probs
         st.dataframe(data)
-        adherence_counts = data["Predicted_Adherence"].value_counts()
-        st.bar_chart(adherence_counts)
-        ratio_df = (adherence_counts / adherence_counts.sum() * 100).reset_index()
-        ratio_df.columns = ["Adherence_Status", "Percentage"]
-        st.area_chart(ratio_df.set_index("Adherence_Status"))
         high_risk = data[data["Non_Adherence_Prob"] >= threshold]
         if not high_risk.empty:
             st.error(f"{len(high_risk)} HIGH-RISK NON-ADHERENT patients")
@@ -179,6 +174,7 @@ if st.button("Run Batch Prediction"):
         st.download_button("Download Predictions as CSV", data=buffer, file_name="patient_predictions.csv", mime="text/csv")
     except:
         st.error("Error during batch prediction")
+
 
 
 
