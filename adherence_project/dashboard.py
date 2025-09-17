@@ -132,15 +132,6 @@ if st.sidebar.button("Predict"):
     except:
         st.error("Error during prediction")
 
-st.sidebar.header("Clinical Insights")
-insights = [
-    "📊 Therapy discontinuation trend is increasing.",
-    "🎯 Objective: Predict patients at risk of going off therapy.",
-    "💡 Suggest recommendations to retain at-risk patients."
-]
-for msg in insights:
-    st.info(msg)
-
 st.subheader("Batch Prediction")
 threshold = st.slider("Non-Adherence Probability Threshold", 0.5, 1.0, 0.7, 0.01)
 recipient = st.text_input("Recipient Email for Alerts")
@@ -174,6 +165,7 @@ if st.button("Run Batch Prediction"):
         st.download_button("Download Predictions as CSV", data=buffer, file_name="patient_predictions.csv", mime="text/csv")
     except:
         st.error("Error during batch prediction")
+
 
 
 
