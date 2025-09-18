@@ -47,7 +47,7 @@ def send_email(patient_id, probability, recipient_email):
     msg["To"] = recipient_email
     try:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login("mittapallilokeswarreddy10@gmail.com", "loki10042005")
+            server.login("mittapallilokeswarreddy10@gmail.com", "dxla ypaw rlsx oumu")
             server.send_message(msg)
         return True
     except:
