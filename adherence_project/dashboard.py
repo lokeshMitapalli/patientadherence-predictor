@@ -205,27 +205,33 @@ if st.button("Run Batch Prediction"):
             total = len(high_risk)
 
             for i, row in enumerate(high_risk.itertuples(), start=1):
-                patient_id = getattr(row, "Patient_ID", "Unknown")
+                patient_id = getattr(row, "Patient_ID", None)
                 probability = getattr(row, "Non_Adherence_Prob", 0)
 
-                if patient_id not in emailed_patients:
-                    email_result = send_email(patient_id, probability, recipient_email)
-                    sms_result = send_sms(patient_id, probability, recipient_number)
+                # Skip unknown patients
+                if not patient_id or str(patient_id).strip().lower() == "unknown":
+                    st.info("Skipped unknown patient (cannot alert)")
+                    continue
 
-                    if email_result is True:
-                        st.success(f"📧 Email sent for Patient {patient_id}")
-                    else:
-                        st.error(email_result)
-
-                    if sms_result is True:
-                        st.success(f"📱 SMS sent for Patient {patient_id}")
-                    else:
-                        st.error(sms_result)
-
-                    emailed_patients.add(patient_id)
-                else:
+                # Skip already alerted patients
+                if patient_id in emailed_patients:
                     st.info(f"Skipped Patient {patient_id} (already alerted)")
+                    continue
 
+                email_result = send_email(patient_id, probability, recipient_email)
+                sms_result = send_sms(patient_id, probability, recipient_number)
+
+                if email_result is True:
+                    st.success(f"📧 Email sent for Patient {patient_id}")
+                else:
+                    st.error(email_result)
+
+                if sms_result is True:
+                    st.success(f"📱 SMS sent for Patient {patient_id}")
+                else:
+                    st.error(sms_result)
+
+                emailed_patients.add(patient_id)
                 progress_bar.progress(i / total)
 
             with open(EMAIL_RECORD_FILE, "w") as f:
@@ -242,6 +248,7 @@ if st.button("Run Batch Prediction"):
 
     except Exception as e:
         st.error(f"Error during batch prediction: {e}")
+
 
 
 
