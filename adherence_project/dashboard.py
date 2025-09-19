@@ -40,19 +40,30 @@ def encode_dataframe(df):
             df[col] = df[col].astype('category').cat.codes
     return df
 
-def send_email(patient_id, probability, recipient_email):
-    msg = MIMEText(f"⚠ Alert: Patient {patient_id} is NON-ADHERENT.\nEstimated Non-Adherence Probability: {probability*100:.1f}%\nPlease follow up immediately.")
+def send_email(patient_id, probability, recipient_email, sender_email, app_password):
+    msg = MIMEText(
+        f"⚠ Alert: Patient {patient_id} is NON-ADHERENT.\n"
+        f"Estimated Non-Adherence Probability: {probability*100:.1f}%\n"
+        f"Please follow up immediately."
+    )
     msg["Subject"] = "🚨 Non-Adherence Alert"
-    msg["From"] = "your_email@gmail.com"
+    msg["From"] = sender_email
     msg["To"] = recipient_email
+
     try:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login("mittapallilokeswarreddy10@gmail.com", "dxla ypaw rlsx oumu")
+            server.login(sender_email, app_password)
             server.send_message(msg)
         return True
-    except:
+    except Exception as e:
+        st.error(f"Email error for Patient {patient_id}: {e}")
         return False
 
+# Initialize session state for email log
+if "email_log" not in st.session_state:
+    st.session_state.email_log = []
+
+# Load model
 model = None
 model_path = os.path.join(os.path.dirname(__file__), 'model.pkl')
 
@@ -84,11 +95,13 @@ if model is None:
 if model is None:
     st.stop()
 
+# Upload dataset
 st.sidebar.header("Upload Dataset (CSV)")
 uploaded_file = st.sidebar.file_uploader("Upload CSV", type=["csv"])
 
 if uploaded_file:
     data = pd.read_csv(uploaded_file)
+    st.session_state.email_log = []  # reset log when dataset changes
     show_toast("✅ Dataset uploaded successfully!", color="green")
     st.dataframe(data.head())
 else:
@@ -106,6 +119,7 @@ else:
 
 X = data.drop(columns=["Adherence"], errors='ignore')
 
+# Sidebar for single prediction
 st.sidebar.header("Single Prediction")
 input_data = {}
 for col in X.columns:
@@ -117,11 +131,14 @@ if st.sidebar.button("Predict"):
         input_df = pd.DataFrame([input_data])
         input_df = encode_dataframe(input_df)
         for col in input_df.columns:
-            try: input_df[col] = pd.to_numeric(input_df[col])
-            except: pass
+            try: 
+                input_df[col] = pd.to_numeric(input_df[col])
+            except: 
+                pass
         trained_features = model.feature_names_in_
         for col in trained_features:
-            if col not in input_df.columns: input_df[col] = 0
+            if col not in input_df.columns: 
+                input_df[col] = 0
         input_df = input_df[trained_features]
         prediction = model.predict(input_df)[0]
         result = "Adherent" if prediction == 1 else "Non-Adherent"
@@ -133,9 +150,26 @@ if st.sidebar.button("Predict"):
     except:
         st.error("Error during prediction")
 
+# Email settings
+st.sidebar.subheader("Email Settings")
+sender_email = st.sidebar.text_input("Sender Gmail Address", value="mittapallilokeswarreddy10@gmail.com")
+app_password = st.sidebar.text_input("App Password", type="password")
+recipient = st.sidebar.text_input("Recipient Email for Alerts")
+enable_email = st.sidebar.checkbox("Enable Email Alerts", value=True)
+
+if st.sidebar.button("Send Test Email"):
+    if recipient.strip() and sender_email.strip() and app_password.strip():
+        test_status = send_email("TEST_PATIENT", 0.85, recipient, sender_email, app_password)
+        if test_status:
+            st.sidebar.success(f"✅ Test email sent successfully to {recipient}")
+        else:
+            st.sidebar.error("❌ Failed to send test email. Check Gmail/App Password.")
+    else:
+        st.sidebar.warning("Please fill in Sender, App Password, and Recipient before testing.")
+
+# Batch prediction
 st.subheader("Batch Prediction")
 threshold = st.slider("Non-Adherence Probability Threshold", 0.5, 1.0, 0.7, 0.01)
-recipient = st.text_input("Recipient Email for Alerts")
 
 EMAIL_RECORD_FILE = os.path.join(os.path.dirname(__file__), "emailed_patients.json")
 if os.path.exists(EMAIL_RECORD_FILE):
@@ -150,7 +184,8 @@ if st.button("Run Batch Prediction"):
         X_copy = encode_dataframe(X_copy)
         trained_features = model.feature_names_in_
         for col in trained_features:
-            if col not in X_copy.columns: X_copy[col] = 0
+            if col not in X_copy.columns: 
+                X_copy[col] = 0
         X_copy = X_copy[trained_features]
 
         preds = model.predict(X_copy)
@@ -174,11 +209,29 @@ if st.button("Run Batch Prediction"):
                 probability = getattr(row, "Non_Adherence_Prob", 0)
 
                 if patient_id not in emailed_patients:
-                    success = send_email(patient_id, probability, recipient)
-                    if success:
-                        st.success(f"Email sent for Patient {patient_id} ({probability*100:.1f}%)")
+                    if enable_email:
+                        success = send_email(patient_id, probability, recipient, sender_email, app_password)
+                        if success:
+                            st.success(f"Email sent for Patient {patient_id} ({probability*100:.1f}%)")
+                            st.session_state.email_log.append({
+                                "Patient_ID": patient_id,
+                                "Probability": f"{probability*100:.1f}%",
+                                "Status": "✅ Sent"
+                            })
+                        else:
+                            st.error(f"Failed to send email for Patient {patient_id}")
+                            st.session_state.email_log.append({
+                                "Patient_ID": patient_id,
+                                "Probability": f"{probability*100:.1f}%",
+                                "Status": "❌ Failed"
+                            })
                     else:
-                        st.error(f"Failed to send email for Patient {patient_id}")
+                        st.info(f"Email alerts disabled. Skipping Patient {patient_id}")
+                        st.session_state.email_log.append({
+                            "Patient_ID": patient_id,
+                            "Probability": f"{probability*100:.1f}%",
+                            "Status": "⏭ Skipped"
+                        })
                     emailed_patients.add(patient_id)
                 else:
                     st.info(f"Skipped Patient {patient_id} (already emailed)")
@@ -199,6 +252,24 @@ if st.button("Run Batch Prediction"):
 
     except Exception as e:
         st.error(f"Error during batch prediction: {e}")
+
+# Show Email Log
+if st.session_state.email_log:
+    st.subheader("📋 Email Alert Log")
+    log_df = pd.DataFrame(st.session_state.email_log)
+    st.dataframe(log_df)
+
+    # Download button for email log
+    log_buffer = BytesIO()
+    log_df.to_csv(log_buffer, index=False)
+    log_buffer.seek(0)
+    st.download_button(
+        label="⬇️ Download Email Log as CSV",
+        data=log_buffer,
+        file_name="email_alert_log.csv",
+        mime="text/csv"
+    )
+
 
 
 
