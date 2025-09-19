@@ -41,8 +41,8 @@ def encode_dataframe(df):
     return df
 
 # Load Gmail credentials from secrets.toml
-sender_email = st.secrets["gmail"]["email"]
-app_password = st.secrets["gmail"]["app_password"]
+sender_email = st.secrets["gmail"]["mittapallilokeswarreddy10@gmail.com"]
+app_password = st.secrets["gmail"]["dxla ypaw rlsx oumu"]
 
 def send_email(patient_id, probability, recipient_email):
     msg = MIMEText(
