@@ -7,6 +7,7 @@ from io import BytesIO
 import smtplib
 from email.mime.text import MIMEText
 import json
+from twilio.rest import Client
 
 st.set_page_config(page_title="Patient Adherence Dashboard", layout="wide")
 st.title("Patient Adherence Prediction Dashboard")
@@ -40,9 +41,15 @@ def encode_dataframe(df):
             df[col] = df[col].astype('category').cat.codes
     return df
 
-# Load Gmail credentials from secrets.toml
-sender_email = st.secrets["gmail"]["mittapallilokeswarreddy10@gmail.com"]
-app_password = st.secrets["gmail"]["dxla ypaw rlsx oumu"]
+# Load Gmail credentials
+sender_email = st.secrets["gmail"]["email"]
+app_password = st.secrets["gmail"]["app_password"]
+
+# Load Twilio credentials
+twilio_sid = st.secrets["twilio"]["account_sid"]
+twilio_token = st.secrets["twilio"]["auth_token"]
+twilio_from = st.secrets["twilio"]["from_number"]
+twilio_client = Client(twilio_sid, twilio_token)
 
 def send_email(patient_id, probability, recipient_email):
     msg = MIMEText(
@@ -61,6 +68,18 @@ def send_email(patient_id, probability, recipient_email):
     except Exception as e:
         return f"Email error for Patient {patient_id}: {e}"
 
+def send_sms(patient_id, probability, recipient_number):
+    try:
+        message = twilio_client.messages.create(
+            body=f"🚨 Alert: Patient {patient_id} is NON-ADHERENT (Risk: {probability*100:.1f}%)",
+            from_=twilio_from,
+            to=recipient_number
+        )
+        return True
+    except Exception as e:
+        return f"SMS error for Patient {patient_id}: {e}"
+
+# ------------------- MODEL LOADING -------------------
 model = None
 model_path = os.path.join(os.path.dirname(__file__), 'model.pkl')
 
@@ -92,6 +111,7 @@ if model is None:
 if model is None:
     st.stop()
 
+# ------------------- DATA UPLOAD -------------------
 st.sidebar.header("Upload Dataset (CSV)")
 uploaded_file = st.sidebar.file_uploader("Upload CSV", type=["csv"])
 
@@ -114,6 +134,7 @@ else:
 
 X = data.drop(columns=["Adherence"], errors='ignore')
 
+# ------------------- SINGLE PREDICTION -------------------
 st.sidebar.header("Single Prediction")
 input_data = {}
 for col in X.columns:
@@ -144,9 +165,11 @@ if st.sidebar.button("Predict"):
     except:
         st.error("Error during prediction")
 
+# ------------------- BATCH PREDICTION -------------------
 st.subheader("Batch Prediction")
 threshold = st.slider("Non-Adherence Probability Threshold", 0.5, 1.0, 0.7, 0.01)
-recipient = st.text_input("Recipient Email for Alerts")
+recipient_email = st.text_input("Recipient Email for Alerts")
+recipient_number = st.text_input("Recipient Phone Number for SMS (e.g. +919876543210)")
 
 EMAIL_RECORD_FILE = os.path.join(os.path.dirname(__file__), "emailed_patients.json")
 if os.path.exists(EMAIL_RECORD_FILE):
@@ -177,7 +200,7 @@ if st.button("Run Batch Prediction"):
             st.error(f"{len(high_risk)} HIGH-RISK NON-ADHERENT patients")
             st.dataframe(high_risk)
 
-            st.info("📧 Sending email alerts in real-time...")
+            st.info("📧📱 Sending alerts (Email + SMS)...")
             progress_bar = st.progress(0)
             total = len(high_risk)
 
@@ -186,21 +209,29 @@ if st.button("Run Batch Prediction"):
                 probability = getattr(row, "Non_Adherence_Prob", 0)
 
                 if patient_id not in emailed_patients:
-                    result = send_email(patient_id, probability, recipient)
-                    if result is True:
-                        st.success(f"Email sent for Patient {patient_id} ({probability*100:.1f}%)")
+                    email_result = send_email(patient_id, probability, recipient_email)
+                    sms_result = send_sms(patient_id, probability, recipient_number)
+
+                    if email_result is True:
+                        st.success(f"📧 Email sent for Patient {patient_id}")
                     else:
-                        st.error(result)
+                        st.error(email_result)
+
+                    if sms_result is True:
+                        st.success(f"📱 SMS sent for Patient {patient_id}")
+                    else:
+                        st.error(sms_result)
+
                     emailed_patients.add(patient_id)
                 else:
-                    st.info(f"Skipped Patient {patient_id} (already emailed)")
+                    st.info(f"Skipped Patient {patient_id} (already alerted)")
 
                 progress_bar.progress(i / total)
 
             with open(EMAIL_RECORD_FILE, "w") as f:
                 json.dump(list(emailed_patients), f)
 
-            st.success("✅ All email alerts processed")
+            st.success("✅ All alerts processed")
         else:
             st.success("All patients below risk threshold")
 
@@ -211,6 +242,7 @@ if st.button("Run Batch Prediction"):
 
     except Exception as e:
         st.error(f"Error during batch prediction: {e}")
+
 
 
 
