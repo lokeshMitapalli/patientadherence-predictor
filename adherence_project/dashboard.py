@@ -70,7 +70,7 @@ def send_email(patient_id, probability, recipient_email):
 
 def send_sms(patient_id, probability, recipient_number):
     try:
-        message = twilio_client.messages.create(
+        twilio_client.messages.create(
             body=f"🚨 Alert: Patient {patient_id} is NON-ADHERENT (Risk: {probability*100:.1f}%)",
             from_=twilio_from,
             to=recipient_number
@@ -128,7 +128,7 @@ else:
         st.stop()
 
 if "Adherence" in data.columns:
-    y = data["Adherence"].fillna("").apply(lambda x: 1 if str(x).strip().lower() == "adherent" else 0)
+    y = data["Adherence"]
 else:
     y = None
 
@@ -155,21 +155,24 @@ if st.sidebar.button("Predict"):
             if col not in input_df.columns:
                 input_df[col] = 0
         input_df = input_df[trained_features]
+
         prediction = model.predict(input_df)[0]
-        result = "Adherent" if prediction == 1 else "Non-Adherent"
+
         if hasattr(model, "predict_proba"):
-            proba = model.predict_proba(input_df)[0][1]
-            st.write(f"Prediction probability (Non-Adherent): {proba*100:.1f}%")
-        show_toast(f"✅ Single prediction: {result}", color="green")
-        st.success(f"Prediction: {result}")
-    except:
-        st.error("Error during prediction")
+            proba = model.predict_proba(input_df)[0]
+            class_probs = dict(zip(model.classes_, proba))
+            st.write("Prediction Probabilities:", class_probs)
+
+        show_toast(f"✅ Single prediction: {prediction}", color="green")
+        st.success(f"Prediction: {prediction}")
+    except Exception as e:
+        st.error(f"Error during prediction: {e}")
 
 # ------------------- BATCH PREDICTION -------------------
 st.subheader("Batch Prediction")
 threshold = st.slider("Non-Adherence Probability Threshold", 0.5, 1.0, 0.7, 0.01)
-recipient_email = st.text_input("Recipient Email for Alerts")
-recipient_number = st.text_input("Recipient Phone Number for SMS (e.g. +919876543210)")
+recipient_email = st.text_input("Default Recipient Email (if patient email missing)")
+recipient_number = st.text_input("Default Recipient Phone Number (if patient phone missing, e.g. +919876543210)")
 
 EMAIL_RECORD_FILE = os.path.join(os.path.dirname(__file__), "emailed_patients.json")
 if os.path.exists(EMAIL_RECORD_FILE):
@@ -180,8 +183,7 @@ else:
 
 if st.button("Run Batch Prediction"):
     try:
-        X_copy = X.copy()
-        X_copy = encode_dataframe(X_copy)
+        X_copy = encode_dataframe(X.copy())
         trained_features = model.feature_names_in_
         for col in trained_features:
             if col not in X_copy.columns:
@@ -189,8 +191,18 @@ if st.button("Run Batch Prediction"):
         X_copy = X_copy[trained_features]
 
         preds = model.predict(X_copy)
-        probs = model.predict_proba(X_copy)[:, 1] if hasattr(model, "predict_proba") else [0]*len(X_copy)
-        data["Predicted_Adherence"] = ["Adherent" if p == 1 else "Non-Adherent" for p in preds]
+
+        if hasattr(model, "predict_proba"):
+            proba = model.predict_proba(X_copy)
+            if "Non-Adherent" in model.classes_:
+                idx = list(model.classes_).index("Non-Adherent")
+                probs = proba[:, idx]
+            else:
+                probs = proba[:, 1]
+        else:
+            probs = [0]*len(X_copy)
+
+        data["Predicted_Adherence"] = preds
         data["Non_Adherence_Prob"] = probs
         st.dataframe(data)
 
@@ -206,30 +218,36 @@ if st.button("Run Batch Prediction"):
 
             for i, row in enumerate(high_risk.itertuples(), start=1):
                 patient_id = getattr(row, "Patient_ID", None)
+                patient_email = getattr(row, "Email", None) if "Email" in data.columns else None
+                patient_phone = getattr(row, "Phone", None) if "Phone" in data.columns else None
                 probability = getattr(row, "Non_Adherence_Prob", 0)
 
-                # Skip unknown patients
                 if not patient_id or str(patient_id).strip().lower() == "unknown":
                     st.info("Skipped unknown patient (cannot alert)")
                     continue
 
-                # Skip already alerted patients
                 if patient_id in emailed_patients:
                     st.info(f"Skipped Patient {patient_id} (already alerted)")
                     continue
 
-                email_result = send_email(patient_id, probability, recipient_email)
-                sms_result = send_sms(patient_id, probability, recipient_number)
+                # Fallback to defaults if patient-specific data missing
+                target_email = patient_email if patient_email else recipient_email
+                target_phone = patient_phone if patient_phone else recipient_number
 
+                # Send alerts
+                email_result = send_email(patient_id, probability, target_email) if target_email else "No email available"
+                sms_result = send_sms(patient_id, probability, target_phone) if target_phone else "No phone available"
+
+                # Show results with patient details
                 if email_result is True:
-                    st.success(f"📧 Email sent for Patient {patient_id}")
+                    st.success(f"📧 Email sent for Patient {patient_id} → {target_email}")
                 else:
-                    st.error(email_result)
+                    st.error(f"Email failed for Patient {patient_id}: {email_result}")
 
                 if sms_result is True:
-                    st.success(f"📱 SMS sent for Patient {patient_id}")
+                    st.success(f"📱 SMS sent for Patient {patient_id} → {target_phone}")
                 else:
-                    st.error(sms_result)
+                    st.error(f"SMS failed for Patient {patient_id}: {sms_result}")
 
                 emailed_patients.add(patient_id)
                 progress_bar.progress(i / total)
@@ -248,6 +266,7 @@ if st.button("Run Batch Prediction"):
 
     except Exception as e:
         st.error(f"Error during batch prediction: {e}")
+
 
 
 
