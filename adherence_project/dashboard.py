@@ -70,7 +70,7 @@ def send_email(patient_id, probability, recipient_email):
 
 def send_sms(patient_id, probability, recipient_number):
     try:
-        twilio_client.messages.create(
+        message = twilio_client.messages.create(
             body=f"🚨 Alert: Patient {patient_id} is NON-ADHERENT (Risk: {probability*100:.1f}%)",
             from_=twilio_from,
             to=recipient_number
@@ -128,7 +128,7 @@ else:
         st.stop()
 
 if "Adherence" in data.columns:
-    y = data["Adherence"]
+    y = data["Adherence"].fillna("").apply(lambda x: 0 if str(x).strip().lower() == "adherent" else 1)
 else:
     y = None
 
@@ -138,8 +138,9 @@ X = data.drop(columns=["Adherence"], errors='ignore')
 st.sidebar.header("Single Prediction")
 input_data = {}
 for col in X.columns:
-    value = st.sidebar.text_input(f"{col}")
-    input_data[col] = value
+    if col not in ["Patient_ID", "Email", "Phone"]:
+        value = st.sidebar.text_input(f"{col}")
+        input_data[col] = value
 
 if st.sidebar.button("Predict"):
     try:
@@ -155,18 +156,15 @@ if st.sidebar.button("Predict"):
             if col not in input_df.columns:
                 input_df[col] = 0
         input_df = input_df[trained_features]
-
         prediction = model.predict(input_df)[0]
-
+        result = "Adherent" if prediction == 0 else "Non-Adherent"
         if hasattr(model, "predict_proba"):
-            proba = model.predict_proba(input_df)[0]
-            class_probs = dict(zip(model.classes_, proba))
-            st.write("Prediction Probabilities:", class_probs)
-
-        show_toast(f"✅ Single prediction: {prediction}", color="green")
-        st.success(f"Prediction: {prediction}")
-    except Exception as e:
-        st.error(f"Error during prediction: {e}")
+            proba = model.predict_proba(input_df)[0][1]
+            st.write(f"Prediction probability (Non-Adherent): {proba*100:.1f}%")
+        show_toast(f"✅ Single prediction: {result}", color="green")
+        st.success(f"Prediction: {result}")
+    except:
+        st.error("Error during prediction")
 
 # ------------------- BATCH PREDICTION -------------------
 st.subheader("Batch Prediction")
@@ -183,7 +181,8 @@ else:
 
 if st.button("Run Batch Prediction"):
     try:
-        X_copy = encode_dataframe(X.copy())
+        X_copy = X.copy()
+        X_copy = encode_dataframe(X_copy)
         trained_features = model.feature_names_in_
         for col in trained_features:
             if col not in X_copy.columns:
@@ -191,18 +190,10 @@ if st.button("Run Batch Prediction"):
         X_copy = X_copy[trained_features]
 
         preds = model.predict(X_copy)
+        probs = model.predict_proba(X_copy)[:, 1] if hasattr(model, "predict_proba") else [0]*len(X_copy)
 
-        if hasattr(model, "predict_proba"):
-            proba = model.predict_proba(X_copy)
-            if "Non-Adherent" in model.classes_:
-                idx = list(model.classes_).index("Non-Adherent")
-                probs = proba[:, idx]
-            else:
-                probs = proba[:, 1]
-        else:
-            probs = [0]*len(X_copy)
-
-        data["Predicted_Adherence"] = preds
+        # Use readable labels
+        data["Predicted_Adherence"] = ["Adherent" if p == 0 else "Non-Adherent" for p in preds]
         data["Non_Adherence_Prob"] = probs
         st.dataframe(data)
 
@@ -234,11 +225,9 @@ if st.button("Run Batch Prediction"):
                 target_email = patient_email if patient_email else recipient_email
                 target_phone = patient_phone if patient_phone else recipient_number
 
-                # Send alerts
                 email_result = send_email(patient_id, probability, target_email) if target_email else "No email available"
                 sms_result = send_sms(patient_id, probability, target_phone) if target_phone else "No phone available"
 
-                # Show results with patient details
                 if email_result is True:
                     st.success(f"📧 Email sent for Patient {patient_id} → {target_email}")
                 else:
@@ -266,6 +255,7 @@ if st.button("Run Batch Prediction"):
 
     except Exception as e:
         st.error(f"Error during batch prediction: {e}")
+
 
 
 
