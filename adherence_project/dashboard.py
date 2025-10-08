@@ -7,6 +7,7 @@ from io import BytesIO
 import smtplib
 from email.mime.text import MIMEText
 from twilio.rest import Client
+from datetime import datetime
 
 st.set_page_config(page_title="Patient Adherence Dashboard", layout="wide")
 st.title("Patient Adherence Prediction Dashboard")
@@ -50,13 +51,19 @@ twilio_token = st.secrets["twilio"]["auth_token"]
 twilio_from = st.secrets["twilio"]["from_number"]
 twilio_client = Client(twilio_sid, twilio_token)
 
+# ------------------- UPDATED ALERT FUNCTIONS -------------------
 def send_email(patient_id, probability, recipient_email):
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     msg = MIMEText(
-        f"⚠ Alert: Patient {patient_id} is NON-ADHERENT.\n"
-        f"Estimated Non-Adherence Probability: {probability*100:.1f}%\n"
-        f"Please follow up immediately."
+        f"🚨 Hospital Alert\n\n"
+        f"Patient ID: {patient_id}\n"
+        f"Status: NON-ADHERENT\n"
+        f"Estimated Risk: {probability*100:.1f}%\n"
+        f"Timestamp: {current_time}\n\n"
+        f"Please schedule a follow-up consultation today.\n\n"
+        f"— Automated Patient Monitoring System"
     )
-    msg["Subject"] = "🚨 Non-Adherence Alert"
+    msg["Subject"] = "🚨 Hospital Alert: Non-Adherence Detected"
     msg["From"] = sender_email
     msg["To"] = recipient_email
     try:
@@ -68,9 +75,16 @@ def send_email(patient_id, probability, recipient_email):
         return f"Email error for Patient {patient_id}: {e}"
 
 def send_sms(patient_id, probability, recipient_number):
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
         twilio_client.messages.create(
-            body=f"🚨 Alert: Patient {patient_id} is NON-ADHERENT (Risk: {probability*100:.1f}%)",
+            body=(
+                f"🚨 Hospital Alert: Patient {patient_id} shows high non-adherence risk "
+                f"({probability*100:.1f}%).\n"
+                f"Time: {current_time}\n"
+                f"Please schedule a follow-up consultation today.\n"
+                f"— Automated Patient Monitoring System"
+            ),
             from_=twilio_from,
             to=recipient_number
         )
@@ -207,6 +221,7 @@ if st.button("Run Batch Prediction"):
                 target_email = patient_email if patient_email else recipient_email
                 target_phone = patient_phone if patient_phone else recipient_number
 
+                # Always send alerts (no skipping)
                 email_result = send_email(patient_id, probability, target_email) if target_email else "No email available"
                 if email_result is True:
                     st.success(f"📧 Email sent for Patient {patient_id} → {target_email}")
@@ -237,6 +252,7 @@ if st.button("Run Batch Prediction"):
 
     except Exception as e:
         st.error(f"Error during batch prediction: {e}")
+
 
 
 
