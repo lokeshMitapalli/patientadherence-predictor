@@ -6,7 +6,6 @@ import pickle
 from io import BytesIO
 import smtplib
 from email.mime.text import MIMEText
-import json
 from twilio.rest import Client
 
 st.set_page_config(page_title="Patient Adherence Dashboard", layout="wide")
@@ -171,14 +170,6 @@ st.subheader("Batch Prediction")
 threshold = st.slider("Non-Adherence Probability Threshold", 0.5, 1.0, 0.7, 0.01)
 recipient_email = st.text_input("Default Recipient Email (if patient email missing)")
 recipient_number = st.text_input("Default Recipient Phone Number (if patient phone missing, e.g. +919876543210)")
-always_send_alerts = st.checkbox("📬 Always send alerts (ignore previous records)", value=True)
-
-EMAIL_RECORD_FILE = os.path.join(os.path.dirname(__file__), "emailed_patients.json")
-if os.path.exists(EMAIL_RECORD_FILE):
-    with open(EMAIL_RECORD_FILE, "r") as f:
-        emailed_patients = set(json.load(f))
-else:
-    emailed_patients = set()
 
 if st.button("Run Batch Prediction"):
     try:
@@ -213,10 +204,6 @@ if st.button("Run Batch Prediction"):
                 patient_phone = getattr(row, "Phone", None) if "Phone" in data.columns else None
                 probability = getattr(row, "Non_Adherence_Prob", 0)
 
-                if not always_send_alerts and patient_id in emailed_patients:
-                    st.info(f"Skipped Patient {patient_id} (already alerted)")
-                    continue
-
                 target_email = patient_email if patient_email else recipient_email
                 target_phone = patient_phone if patient_phone else recipient_number
 
@@ -232,12 +219,7 @@ if st.button("Run Batch Prediction"):
                 else:
                     st.error(f"SMS failed for Patient {patient_id}: {sms_result}")
 
-                emailed_patients.add(patient_id)
                 progress_bar.progress(i / total)
-
-            if not always_send_alerts:
-                with open(EMAIL_RECORD_FILE, "w") as f:
-                    json.dump(list(emailed_patients), f)
 
             st.success("✅ All alerts processed")
         else:
@@ -255,6 +237,7 @@ if st.button("Run Batch Prediction"):
 
     except Exception as e:
         st.error(f"Error during batch prediction: {e}")
+
 
 
 
