@@ -70,7 +70,7 @@ def send_email(patient_id, probability, recipient_email):
 
 def send_sms(patient_id, probability, recipient_number):
     try:
-        message = twilio_client.messages.create(
+        twilio_client.messages.create(
             body=f"🚨 Alert: Patient {patient_id} is NON-ADHERENT (Risk: {probability*100:.1f}%)",
             from_=twilio_from,
             to=recipient_number
@@ -171,6 +171,7 @@ st.subheader("Batch Prediction")
 threshold = st.slider("Non-Adherence Probability Threshold", 0.5, 1.0, 0.7, 0.01)
 recipient_email = st.text_input("Default Recipient Email (if patient email missing)")
 recipient_number = st.text_input("Default Recipient Phone Number (if patient phone missing, e.g. +919876543210)")
+always_send_alerts = st.checkbox("📬 Always send alerts (ignore previous records)", value=True)
 
 EMAIL_RECORD_FILE = os.path.join(os.path.dirname(__file__), "emailed_patients.json")
 if os.path.exists(EMAIL_RECORD_FILE):
@@ -192,7 +193,6 @@ if st.button("Run Batch Prediction"):
         preds = model.predict(X_copy)
         probs = model.predict_proba(X_copy)[:, 1] if hasattr(model, "predict_proba") else [0]*len(X_copy)
 
-        # Use readable labels
         data["Predicted_Adherence"] = ["Adherent" if p == 0 else "Non-Adherent" for p in preds]
         data["Non_Adherence_Prob"] = probs
         st.dataframe(data)
@@ -208,31 +208,25 @@ if st.button("Run Batch Prediction"):
             total = len(high_risk)
 
             for i, row in enumerate(high_risk.itertuples(), start=1):
-                patient_id = getattr(row, "Patient_ID", None)
+                patient_id = getattr(row, "Patient_ID", f"Patient-{i}")
                 patient_email = getattr(row, "Email", None) if "Email" in data.columns else None
                 patient_phone = getattr(row, "Phone", None) if "Phone" in data.columns else None
                 probability = getattr(row, "Non_Adherence_Prob", 0)
 
-                if not patient_id or str(patient_id).strip().lower() == "unknown":
-                    st.info("Skipped unknown patient (cannot alert)")
-                    continue
-
-                if patient_id in emailed_patients:
+                if not always_send_alerts and patient_id in emailed_patients:
                     st.info(f"Skipped Patient {patient_id} (already alerted)")
                     continue
 
-                # Fallback to defaults if patient-specific data missing
                 target_email = patient_email if patient_email else recipient_email
                 target_phone = patient_phone if patient_phone else recipient_number
 
                 email_result = send_email(patient_id, probability, target_email) if target_email else "No email available"
-                sms_result = send_sms(patient_id, probability, target_phone) if target_phone else "No phone available"
-
                 if email_result is True:
                     st.success(f"📧 Email sent for Patient {patient_id} → {target_email}")
                 else:
                     st.error(f"Email failed for Patient {patient_id}: {email_result}")
 
+                sms_result = send_sms(patient_id, probability, target_phone) if target_phone else "No phone available"
                 if sms_result is True:
                     st.success(f"📱 SMS sent for Patient {patient_id} → {target_phone}")
                 else:
@@ -241,8 +235,9 @@ if st.button("Run Batch Prediction"):
                 emailed_patients.add(patient_id)
                 progress_bar.progress(i / total)
 
-            with open(EMAIL_RECORD_FILE, "w") as f:
-                json.dump(list(emailed_patients), f)
+            if not always_send_alerts:
+                with open(EMAIL_RECORD_FILE, "w") as f:
+                    json.dump(list(emailed_patients), f)
 
             st.success("✅ All alerts processed")
         else:
@@ -251,10 +246,16 @@ if st.button("Run Batch Prediction"):
         buffer = BytesIO()
         data.to_csv(buffer, index=False)
         buffer.seek(0)
-        st.download_button("Download Predictions as CSV", data=buffer, file_name="patient_predictions.csv", mime="text/csv")
+        st.download_button(
+            "Download Predictions as CSV",
+            data=buffer,
+            file_name="patient_predictions.csv",
+            mime="text/csv"
+        )
 
     except Exception as e:
         st.error(f"Error during batch prediction: {e}")
+
 
 
 
