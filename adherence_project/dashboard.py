@@ -8,6 +8,7 @@ import smtplib
 from email.mime.text import MIMEText
 from twilio.rest import Client
 from datetime import datetime
+import re
 
 st.set_page_config(page_title="Patient Adherence Dashboard", layout="wide")
 st.title("Patient Adherence Prediction Dashboard")
@@ -51,7 +52,7 @@ twilio_token = st.secrets["twilio"]["auth_token"]
 twilio_from = st.secrets["twilio"]["from_number"]
 twilio_client = Client(twilio_sid, twilio_token)
 
-# ------------------- UPDATED ALERT FUNCTIONS -------------------
+# ------------------- ALERT FUNCTIONS -------------------
 def send_email(patient_id, probability, recipient_email):
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     msg = MIMEText(
@@ -78,13 +79,11 @@ def send_sms(patient_id, probability, recipient_number):
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
         twilio_client.messages.create(
-            body=(
-                f"🚨 Hospital Alert: Patient {patient_id} shows high non-adherence risk "
-                f"({probability*100:.1f}%).\n"
-                f"Time: {current_time}\n"
-                f"Please schedule a follow-up consultation today.\n"
-                f"— Automated Patient Monitoring System"
-            ),
+            body=(f"🚨 Hospital Alert: Patient {patient_id} shows high non-adherence risk "
+                  f"({probability*100:.1f}%).\n"
+                  f"Time: {current_time}\n"
+                  f"Please schedule a follow-up consultation today.\n"
+                  f"— Automated Patient Monitoring System"),
             from_=twilio_from,
             to=recipient_number
         )
@@ -140,11 +139,41 @@ else:
     else:
         st.stop()
 
+# ------------------- CLEANUP: PHONE + EMAIL -------------------
+def clean_phone(number):
+    if pd.isna(number):
+        return None
+    number = str(number).strip()
+    number = re.sub(r'\D', '', number)
+    if number.startswith('91') and len(number) == 12:
+        return f"+{number}"
+    elif len(number) == 10:
+        return f"+91{number}"
+    elif number.startswith('+91') and len(number) == 13:
+        return number
+    else:
+        return None
+
+def clean_email(email):
+    if pd.isna(email):
+        return None
+    email = str(email).strip()
+    pattern = r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$"
+    return email.lower() if re.match(pattern, email) else None
+
+if "Phone" in data.columns:
+    data["Phone"] = data["Phone"].apply(clean_phone)
+    st.info(f"📱 {data['Phone'].notna().sum()} valid phone numbers formatted for Twilio")
+
+if "Email" in data.columns:
+    data["Email"] = data["Email"].apply(clean_email)
+    st.info(f"📧 {data['Email'].notna().sum()} valid email addresses cleaned")
+
+# ------------------- FEATURE PREPARATION -------------------
 if "Adherence" in data.columns:
     y = data["Adherence"].fillna("").apply(lambda x: 0 if str(x).strip().lower() == "adherent" else 1)
 else:
     y = None
-
 X = data.drop(columns=["Adherence"], errors='ignore')
 
 # ------------------- SINGLE PREDICTION -------------------
@@ -214,14 +243,13 @@ if st.button("Run Batch Prediction"):
 
             for i, row in enumerate(high_risk.itertuples(), start=1):
                 patient_id = getattr(row, "Patient_ID", f"Patient-{i}")
-                patient_email = getattr(row, "Email", None) if "Email" in data.columns else None
-                patient_phone = getattr(row, "Phone", None) if "Phone" in data.columns else None
+                patient_email = getattr(row, "Email", None)
+                patient_phone = getattr(row, "Phone", None)
                 probability = getattr(row, "Non_Adherence_Prob", 0)
 
                 target_email = patient_email if patient_email else recipient_email
                 target_phone = patient_phone if patient_phone else recipient_number
 
-                # Always send alerts (no skipping)
                 email_result = send_email(patient_id, probability, target_email) if target_email else "No email available"
                 if email_result is True:
                     st.success(f"📧 Email sent for Patient {patient_id} → {target_email}")
@@ -243,15 +271,12 @@ if st.button("Run Batch Prediction"):
         buffer = BytesIO()
         data.to_csv(buffer, index=False)
         buffer.seek(0)
-        st.download_button(
-            "Download Predictions as CSV",
-            data=buffer,
-            file_name="patient_predictions.csv",
-            mime="text/csv"
-        )
+        st.download_button("Download Predictions as CSV", data=buffer,
+                           file_name="patient_predictions.csv", mime="text/csv")
 
     except Exception as e:
         st.error(f"Error during batch prediction: {e}")
+
 
 
 
