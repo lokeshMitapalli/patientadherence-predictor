@@ -42,17 +42,16 @@ def encode_dataframe(df):
             df[col] = df[col].astype('category').cat.codes
     return df
 
-# Load Gmail credentials
+
 sender_email = st.secrets["gmail"]["email"]
 app_password = st.secrets["gmail"]["app_password"]
 
-# Load Twilio credentials
 twilio_sid = st.secrets["twilio"]["account_sid"]
 twilio_token = st.secrets["twilio"]["auth_token"]
 twilio_from = st.secrets["twilio"]["from_number"]
 twilio_client = Client(twilio_sid, twilio_token)
 
-# ------------------- ALERT FUNCTIONS -------------------
+
 def send_email(patient_id, probability, recipient_email):
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     msg = MIMEText(
@@ -91,7 +90,7 @@ def send_sms(patient_id, probability, recipient_number):
     except Exception as e:
         return f"SMS error for Patient {patient_id}: {e}"
 
-# ------------------- MODEL LOADING -------------------
+
 model = None
 model_path = os.path.join(os.path.dirname(__file__), 'model.pkl')
 
@@ -123,7 +122,7 @@ if model is None:
 if model is None:
     st.stop()
 
-# ------------------- DATA UPLOAD -------------------
+
 st.sidebar.header("Upload Dataset (CSV)")
 uploaded_file = st.sidebar.file_uploader("Upload CSV", type=["csv"])
 
@@ -139,17 +138,27 @@ else:
     else:
         st.stop()
 
-# ------------------- CLEANUP: PHONE + EMAIL -------------------
 def clean_phone(number):
+    """
+    Cleans and formats Indian phone numbers to +91XXXXXXXXXX format.
+    Accepts numbers like 9876543210, 09876543210, 919876543210, +919876543210.
+    """
     if pd.isna(number):
         return None
+
     number = str(number).strip()
-    number = re.sub(r'\D', '', number)
-    if number.startswith('91') and len(number) == 12:
-        return f"+{number}"
-    elif len(number) == 10:
+    number = re.sub(r'\D', '', number)  # remove non-digits
+
+    # Remove leading 0 if present
+    if number.startswith("0") and len(number) == 11:
+        number = number[1:]
+
+    # Handle cases
+    if len(number) == 10:
         return f"+91{number}"
-    elif number.startswith('+91') and len(number) == 13:
+    elif len(number) == 12 and number.startswith("91"):
+        return f"+{number}"
+    elif len(number) == 13 and number.startswith("+91"):
         return number
     else:
         return None
@@ -169,14 +178,12 @@ if "Email" in data.columns:
     data["Email"] = data["Email"].apply(clean_email)
     st.info(f"📧 {data['Email'].notna().sum()} valid email addresses cleaned")
 
-# ------------------- FEATURE PREPARATION -------------------
 if "Adherence" in data.columns:
     y = data["Adherence"].fillna("").apply(lambda x: 0 if str(x).strip().lower() == "adherent" else 1)
 else:
     y = None
 X = data.drop(columns=["Adherence"], errors='ignore')
 
-# ------------------- SINGLE PREDICTION -------------------
 st.sidebar.header("Single Prediction")
 input_data = {}
 for col in X.columns:
@@ -208,7 +215,6 @@ if st.sidebar.button("Predict"):
     except:
         st.error("Error during prediction")
 
-# ------------------- BATCH PREDICTION -------------------
 st.subheader("Batch Prediction")
 threshold = st.slider("Non-Adherence Probability Threshold", 0.5, 1.0, 0.7, 0.01)
 recipient_email = st.text_input("Default Recipient Email (if patient email missing)")
